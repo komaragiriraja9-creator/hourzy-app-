@@ -1,0 +1,336 @@
+<!DOCTYPE html>
+<html lang="te">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hourzy</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<style>
+*{box-sizing:border-box}
+body{margin:0;background:#f1f5f9;color:#172033;font-family:Arial,sans-serif}
+header{background:#087f5b;color:white;padding:18px;font-size:27px;font-weight:bold}
+header small{display:block;font-size:12px;font-weight:normal;margin-top:4px}
+main{max-width:720px;margin:auto;padding:12px}
+.card{background:white;padding:15px;border-radius:13px;margin:12px 0;box-shadow:0 2px 8px #0001}
+input,textarea,button{width:100%;padding:12px;margin:6px 0;border:1px solid #cbd5e1;border-radius:9px;font-size:15px}
+button{background:#087f5b;color:white;border:0;font-weight:bold}
+.secondary{background:#334155}
+.hidden{display:none!important}
+.muted{font-size:13px;color:#64748b}
+#map{height:300px;border-radius:10px}
+.job{border-bottom:1px solid #e2e8f0;padding:12px 0}
+.pin{background:#087f5b;color:white;padding:7px 10px;border:2px solid white;border-radius:15px;font-weight:bold;white-space:nowrap}
+#messages{height:220px;overflow:auto;background:#f8fafc;padding:8px;border-radius:8px}
+.msg{background:#dbeafe;padding:9px;border-radius:8px;margin:6px 0;overflow-wrap:anywhere}
+</style>
+</head>
+<body>
+<header>Hourzy <small>Find work. Get work done.</small></header>
+<main>
+<section id="authBox" class="card">
+<h3 id="authHeading">Hourzyకి స్వాగతం</h3>
+<p class="muted">కొత్త ఖాతా సృష్టించు లేదా లాగిన్ అవ్వు.</p>
+<input id="email" type="email" placeholder="Email address" autocomplete="email">
+<input id="password" type="password" placeholder="Password (కనీసం 6 అక్షరాలు)" autocomplete="current-password">
+<input id="displayName" placeholder="నీ పేరు (కొత్త ఖాతాకు మాత్రమే)">
+<p>నీ పాత్రను ఎంచుకో:</p>
+<select id="role" style="width:100%;padding:12px;border-radius:9px">
+<option value="Huro">Huro — పని చేసేవారు</option>
+<option value="Client">Client — పని ఇచ్చేవారు</option>
+</select>
+<button id="signupBtn">కొత్త ఖాతా సృష్టించు</button>
+<button id="loginBtn" class="secondary">లాగిన్</button>
+<p id="authStatus" class="muted"></p>
+</section>
+
+<section id="app" class="hidden">
+<div class="card">
+<b id="welcome"></b>
+<button class="secondary" id="logoutBtn">లాగ్ అవుట్</button>
+</div>
+
+<section id="clientBox" class="card hidden">
+<h3>కొత్త పని పోస్ట్ చేయి</h3>
+<form id="postForm">
+<input id="title" placeholder="పని పేరు" required>
+<textarea id="details" placeholder="పని వివరాలు" required></textarea>
+<input id="place" placeholder="ప్రాంతం / చిరునామా" required>
+<button type="button" id="gpsPostBtn">GPS లొకేషన్ ఎంచుకో</button>
+<p class="muted" id="locStatus">లేదా మ్యాప్‌పై నొక్కి లొకేషన్ ఎంచుకో.</p>
+<button type="submit">పని పోస్ట్ చేయి</button>
+</form>
+</section>
+
+<section class="card">
+<h3>🗺️ పనుల మ్యాప్</h3>
+<p class="muted">పని పిన్‌ను నొక్కి వివరాలు చూడి. ధర ఇద్దరూ చర్చించుకోవాలి.</p>
+<div id="map"></div>
+<button class="secondary" id="gpsBtn">నా ప్రస్తుత లొకేషన్</button>
+</section>
+
+<section class="card">
+<h3>అందుబాటులో ఉన్న పనులు</h3>
+<div id="jobList">పనులు లోడ్ అవుతున్నాయి...</div>
+</section>
+
+<section id="chatBox" class="card hidden">
+<h3 id="chatHeading">ధర చర్చ</h3>
+<div id="messages"></div>
+<form id="chatForm">
+<input id="chatText" placeholder="సందేశం రాయండి..." required>
+<button type="submit">సందేశం పంపు</button>
+</form>
+</section>
+</section>
+</main>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-app.js";
+import {
+ getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword,
+ onAuthStateChanged, signOut
+} from "https://www.gstatic.com/firebasejs/12.0.0/firebase-auth.js";
+import {
+ getFirestore, collection, doc, setDoc, addDoc, getDoc,
+ query, orderBy, onSnapshot, serverTimestamp, updateDoc, deleteDoc
+} from "https://www.gstatic.com/firebasejs/12.0.0/firebase-firestore.js";
+
+const firebaseConfig = {
+ apiKey:"AIzaSyBtpYYw-u7vftu7TQ9obgxnk_Z_3mRVF5A",
+ authDomain:"hourzy-2f761.firebaseapp.com",
+ projectId:"hourzy-2f761",
+ storageBucket:"hourzy-2f761.firebasestorage.app",
+ messagingSenderId:"506168991003",
+ appId:"1:506168991003:web:ad81921955f708c83247be",
+ measurementId:"G-MHTKSSHCWL"
+};
+
+const appFB=initializeApp(firebaseConfig);
+const auth=getAuth(appFB);
+const db=getFirestore(appFB);
+
+let user=null, profile=null, selectedLoc=null, currentJob=null;
+let stopJobs=null, stopMessages=null, mapReady=false;
+let pins=[], myMarker=null;
+
+const $=id=>document.getElementById(id);
+const esc=s=>String(s??"").replace(/[&<>"']/g,c=>({
+ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"
+}[c]));
+
+const map=L.map("map").setView([14.4426,79.9865],13);
+L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png",{
+ maxZoom:19,
+ attribution:"&copy; OpenStreetMap contributors",
+ referrerPolicy:"strict-origin-when-cross-origin"
+}).addTo(map);
+mapReady=true;
+
+function status(msg){$("authStatus").textContent=msg}
+function errorMsg(e){
+ const messages={
+  "auth/email-already-in-use":"ఈ Emailతో ఇప్పటికే ఖాతా ఉంది. లాగిన్ అవ్వు.",
+  "auth/invalid-email":"సరైన Email ఇవ్వి.",
+  "auth/weak-password":"Password కనీసం 6 అక్షరాలు ఉండాలి.",
+  "auth/invalid-credential":"Email లేదా Password సరిగా లేదు.",
+  "auth/unauthorized-domain":"ఈ వెబ్‌సైట్ Firebase Authenticationలో అనుమతించబడలేదు. Authorized domains సెట్టింగ్ చూడాలి.",
+  "permission-denied":"Firestore Rules అనుమతి ఇవ్వడం లేదు. Rules స్టెప్ పూర్తి చేయాలి."
+ };
+ return messages[e.code] || (e.code ? e.code+": "+e.message : e.message);
+}
+
+$("signupBtn").onclick=async()=>{
+ const email=$("email").value.trim();
+ const password=$("password").value;
+ const name=$("displayName").value.trim();
+ const role=$("role").value;
+ if(!email||!password||!name){status("Email, Password, పేరు నింపు.");return}
+ if(password.length<6){status("Password కనీసం 6 అక్షరాలు ఉండాలి.");return}
+ try{
+  status("ఖాతా సృష్టిస్తున్నాం...");
+  const result=await createUserWithEmailAndPassword(auth,email,password);
+  await setDoc(doc(db,"users",result.user.uid),{
+   name, email, role, createdAt:serverTimestamp()
+  });
+  status("ఖాతా సృష్టించబడింది!");
+ }catch(e){status(errorMsg(e))}
+};
+
+$("loginBtn").onclick=async()=>{
+ const email=$("email").value.trim(), password=$("password").value;
+ if(!email||!password){status("Email, Password నింపు.");return}
+ try{
+  status("లాగిన్ అవుతున్నాం...");
+  await signInWithEmailAndPassword(auth,email,password);
+ }catch(e){status(errorMsg(e))}
+};
+
+$("logoutBtn").onclick=()=>signOut(auth);
+
+onAuthStateChanged(auth,async u=>{
+ user=u;
+ if(stopJobs){stopJobs();stopJobs=null}
+ if(stopMessages){stopMessages();stopMessages=null}
+ $("chatBox").classList.add("hidden");
+ $("app").classList.add("hidden");
+ $("authBox").classList.remove("hidden");
+ if(!u)return;
+ try{
+  const snap=await getDoc(doc(db,"users",u.uid));
+  if(!snap.exists()){
+   status("ఈ ఖాతాకు ప్రొఫైల్ లేదు. లాగ్ అవుట్ చేసి కొత్త ఖాతా సృష్టించు.");
+   return;
+  }
+  profile=snap.data();
+  $("authBox").classList.add("hidden");
+  $("app").classList.remove("hidden");
+  $("welcome").textContent=profile.name+" — "+profile.role;
+  $("clientBox").classList.toggle("hidden",profile.role!=="Client");
+  setTimeout(()=>map.invalidateSize(),200);
+  loadJobs();
+ }catch(e){status(errorMsg(e))}
+});
+
+function loadJobs(){
+ if(stopJobs)stopJobs();
+ stopJobs=onSnapshot(query(collection(db,"Job"),orderBy("createdAt","desc")),snap=>{
+  const jobs=snap.docs.map(d=>({id:d.id,...d.data()}));
+  drawJobs(jobs);
+ },e=>{$("jobList").textContent="పనులు లోడ్ కాలేదు: "+errorMsg(e)});
+}
+
+function drawJobs(jobs){
+ pins.forEach(p=>map.removeLayer(p));pins=[];
+ const root=$("jobList");root.innerHTML="";
+ if(!jobs.length){root.textContent="ఇంకా పనులు లేవు. Client కొత్త పని పోస్ట్ చేయవచ్చు.";return}
+ jobs.forEach(j=>{
+  const lat=Number(j.lat),lng=Number(j.lng);
+  const valid=Number.isFinite(lat)&&Number.isFinite(lng);
+  if(valid){
+   const icon=L.divIcon({className:"",html:'<div class="pin">పని</div>',iconSize:[48,32],iconAnchor:[24,16]});
+   const pin=L.marker([lat,lng],{icon}).addTo(map);
+   pin.bindPopup("<b>"+esc(j.title)+"</b><br>"+esc(j.details)+"<br>"+esc(j.location)+"<br><b>ధర చర్చించుకోవాలి</b>");
+   pins.push(pin);
+  }
+  const d=document.createElement("div");d.className="job";
+  d.innerHTML="<b>"+esc(j.title)+"</b><p>"+esc(j.details)+"</p>"+
+   '<p class="muted">📍 '+esc(j.location)+"</p>"+
+   "<b>💬 ధర చర్చించుకోవాలి</b>"+
+   '<button type="button">మ్యాప్‌లో చూడు</button>'+
+   (profile.role==="Huro"&&j.status!=="closed"?'<button type="button" class="secondary">Client‌తో ధర చర్చించు</button>':"")+
+   (profile.role==="Client"&&j.clientUid===user.uid?'<button type="button" class="secondary">పని తీసివేయి</button>':"");
+  const buttons=d.querySelectorAll("button");
+  buttons[0].onclick=()=>{
+   if(valid){
+    map.setView([lat,lng],16);
+    const pin=pins.find(p=>p.getLatLng().lat===lat&&p.getLatLng().lng===lng);
+    if(pin)pin.openPopup();
+   }else alert("ఈ పాత పనికి GPS లొకేషన్ లేదు.");
+  };
+  let index=1;
+  if(profile.role==="Huro"&&j.status!=="closed"){
+   buttons[index++].onclick=()=>openChat(j);
+  }
+  if(profile.role==="Client"&&j.clientUid===user.uid){
+   buttons[index].onclick=async()=>{
+    if(confirm("ఈ పనిని తొలగించాలా?")){
+     try{await deleteDoc(doc(db,"Job",j.id))}
+     catch(e){alert(errorMsg(e))}
+    }
+   };
+  }
+  root.appendChild(d);
+ });
+}
+
+$("postForm").onsubmit=async e=>{
+ e.preventDefault();
+ if(!user||profile.role!=="Client")return;
+ const loc=selectedLoc||map.getCenter();
+ const title=$("title").value.trim(),details=$("details").value.trim(),place=$("place").value.trim();
+ try{
+  await addDoc(collection(db,"Job"),{
+   title,details,location:place,lat:loc.lat,lng:loc.lng,
+   clientUid:user.uid,clientName:profile.name,
+   status:"open",createdAt:serverTimestamp()
+  });
+  e.target.reset();selectedLoc=null;
+  $("locStatus").textContent="పని పోస్ట్ అయింది.";
+  alert("పని Firebase‌లో సేవ్ అయింది!");
+ }catch(e){alert("పని సేవ్ కాలేదు: "+errorMsg(e))}
+};
+
+function getGPS(forPost){
+ if(!navigator.geolocation){alert("GPS అందుబాటులో లేదు.");return}
+ navigator.geolocation.getCurrentPosition(pos=>{
+  const loc={lat:pos.coords.latitude,lng:pos.coords.longitude};
+  if(myMarker)map.removeLayer(myMarker);
+  myMarker=L.marker([loc.lat,loc.lng]).addTo(map).bindPopup("నీ ప్రస్తుత లొకేషన్");
+  map.setView([loc.lat,loc.lng],15);
+  if(forPost){
+   selectedLoc=loc;
+   $("locStatus").textContent="GPS లొకేషన్ ఎంచుకున్నాం.";
+  }else myMarker.openPopup();
+ },()=>alert("Location permission ఇవ్వి. HTTPS వెబ్‌సైట్‌లో ప్రయత్నించు."));
+}
+$("gpsPostBtn").onclick=()=>getGPS(true);
+$("gpsBtn").onclick=()=>getGPS(false);
+map.on("click",e=>{
+ if(profile?.role==="Client"){
+  selectedLoc={lat:e.latlng.lat,lng:e.latlng.lng};
+  $("locStatus").textContent="మ్యాప్‌లో లొకేషన్ ఎంచుకున్నాం.";
+ }
+});
+
+async function openChat(j){
+ try{
+  const convId=j.id+"_"+user.uid;
+  const ref=doc(db,"conversations",convId);
+  const snap=await getDoc(ref);
+  if(!snap.exists()){
+   await setDoc(ref,{
+    jobId:j.id,jobTitle:j.title,
+    participants:[user.uid,j.clientUid],
+    huroUid:user.uid,clientUid:j.clientUid,
+    createdAt:serverTimestamp()
+   });
+  }
+  currentJob={...j,convId};
+  $("chatHeading").textContent="ధర చర్చ: "+j.title;
+  $("chatBox").classList.remove("hidden");
+  if(stopMessages)stopMessages();
+  stopMessages=onSnapshot(
+   query(collection(db,"conversations",convId,"messages"),orderBy("createdAt","asc")),
+   snap=>{
+    const root=$("messages");root.innerHTML="";
+    snap.forEach(d=>{
+     const m=d.data(),el=document.createElement("div");
+     el.className="msg";
+     el.innerHTML="<b>"+esc(m.senderName||m.senderRole)+":</b> "+esc(m.text);
+     root.appendChild(el);
+    });
+    root.scrollTop=root.scrollHeight;
+   },
+   e=>alert("చాట్ లోడ్ కాలేదు: "+errorMsg(e))
+  );
+  $("chatBox").scrollIntoView({behavior:"smooth"});
+ }catch(e){alert("చాట్ తెరవలేకపోయాం: "+errorMsg(e))}
+}
+
+$("chatForm").onsubmit=async e=>{
+ e.preventDefault();
+ const text=$("chatText").value.trim();
+ if(!text||!currentJob)return;
+ try{
+  await addDoc(collection(db,"conversations",currentJob.convId,"messages"),{
+   text,senderUid:user.uid,senderName:profile.name,
+   senderRole:profile.role,createdAt:serverTimestamp()
+  });
+  $("chatText").value="";
+ }catch(e){alert("సందేశం పంపలేకపోయాం: "+errorMsg(e))}
+};
+</script>
+</body>
+</html>
+
